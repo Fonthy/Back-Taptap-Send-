@@ -100,16 +100,38 @@ public class EnvoyerServiceImpl implements EnvoyerService {
     @Override
     public EnvoyerSelectDTO updateEnvoyer(String idEnv,EnvoyerSelectDTO EnvoyerDTO){
         Envoyer envoyer = convertToEntityUpdate(EnvoyerDTO);
-        Envoyer Envoyer = EnvoyerRepository.findOneByIdEnv(idEnv).orElseThrow();
+        Envoyer initialEnvoyer = EnvoyerRepository.findOneByIdEnv(idEnv).orElseThrow();
         BigDecimal montantEnvoye=new BigDecimal(0);
         BigDecimal montantRecu=new BigDecimal(0);
         /* Remettre aux conditions initials */
-        Client envoyeur = ClientRepository.findByNumTel(Envoyer.getNumEnvoyeur()).orElseThrow();
-        Client recepteur = ClientRepository.findByNumTel(Envoyer.getNumRecepteur()).orElseThrow(); 
+        Client envoyeur = ClientRepository.findByNumTel(initialEnvoyer.getNumEnvoyeur()).orElseThrow();
+        Client recepteur = ClientRepository.findByNumTel(initialEnvoyer.getNumRecepteur()).orElseThrow(); 
         String idSearch = envoyeur.getPays()+"-"+recepteur.getPays();
         Taux taux = TauxRepository.findByIdTaux(idSearch).orElse(null);
-        FraisEnvoi frais = FraisEnvoiRepository.getFrais(idSearch, EnvoyerDTO.montant());
+        FraisEnvoi frais = FraisEnvoiRepository.getFrais(idSearch, initialEnvoyer.getMontant());
         BigDecimal fraisEnvoi=frais.getFrais();
+        if(taux==null){
+            idSearch = recepteur.getPays()+"-"+envoyeur.getPays();
+            taux = TauxRepository.findByIdTaux(idSearch).orElseThrow();
+            montantEnvoye = initialEnvoyer.getMontant().add(fraisEnvoi).setScale(2,RoundingMode.HALF_UP);
+            montantRecu = (taux.getMontant1().multiply(initialEnvoyer.getMontant())).divide(taux.getMontant2()).setScale(2,RoundingMode.HALF_UP);
+        }
+       else{
+            montantEnvoye = initialEnvoyer.getMontant().add(fraisEnvoi).setScale(2,RoundingMode.HALF_UP);
+            montantRecu = (taux.getMontant2().multiply(initialEnvoyer.getMontant())).divide(taux.getMontant1()).setScale(2,RoundingMode.HALF_UP);
+       }
+        envoyeur.setSolde(envoyeur.getSolde().add(montantEnvoye).setScale(2,RoundingMode.HALF_UP));
+        recepteur.setSolde(recepteur.getSolde().subtract(montantRecu).setScale(2,RoundingMode.HALF_UP));
+        ClientRepository.save(envoyeur);
+        ClientRepository.save(recepteur);
+
+        /* tout mettre à jour y compris les montants */
+        envoyeur = ClientRepository.findByNumTel(EnvoyerDTO.numEnvoyeur()).orElseThrow();
+        recepteur = ClientRepository.findByNumTel(EnvoyerDTO.numRecepteur()).orElseThrow(); 
+        idSearch = envoyeur.getPays()+"-"+recepteur.getPays();
+        taux = TauxRepository.findByIdTaux(idSearch).orElse(null);
+        frais = FraisEnvoiRepository.getFrais(idSearch, EnvoyerDTO.montant());
+        fraisEnvoi=frais.getFrais();
         if(taux==null){
             idSearch = recepteur.getPays()+"-"+envoyeur.getPays();
             taux = TauxRepository.findByIdTaux(idSearch).orElseThrow();
@@ -120,30 +142,15 @@ public class EnvoyerServiceImpl implements EnvoyerService {
             montantEnvoye = EnvoyerDTO.montant().add(fraisEnvoi).setScale(2,RoundingMode.HALF_UP);
             montantRecu = (taux.getMontant2().multiply(EnvoyerDTO.montant())).divide(taux.getMontant1()).setScale(2,RoundingMode.HALF_UP);
        }
-       envoyer.setIdFrais(frais.getIdFrais());
-       EnvoyerDTO= convertToDTOSelect(envoyer);
-        envoyeur.setSolde((envoyeur.getSolde()).add(montantEnvoye).setScale(2,RoundingMode.HALF_UP));
-        recepteur.setSolde((recepteur.getSolde().subtract(montantRecu)).setScale(2,RoundingMode.HALF_UP));
-
-        /* tout mettre à jour y compris les montants */
-        envoyeur = ClientRepository.findByNumTel(EnvoyerDTO.numEnvoyeur()).orElseThrow();
-        recepteur = ClientRepository.findByNumTel(EnvoyerDTO.numRecepteur()).orElseThrow(); 
-        frais = FraisEnvoiRepository.getFrais(idSearch, EnvoyerDTO.montant());
-        fraisEnvoi=frais.getFrais();
-        envoyeur.setSolde((envoyeur.getSolde().subtract(EnvoyerDTO.montant()).subtract(fraisEnvoi)).setScale(2,RoundingMode.HALF_UP));
-        recepteur.setSolde((recepteur.getSolde().add((taux.getMontant2().multiply(EnvoyerDTO.montant()).divide(taux.getMontant1())))).setScale(2,RoundingMode.HALF_UP));
+        envoyeur.setSolde(envoyeur.getSolde().subtract(montantEnvoye).setScale(2,RoundingMode.HALF_UP));
+        recepteur.setSolde(recepteur.getSolde().add(montantRecu).setScale(2,RoundingMode.HALF_UP));
         if(envoyeur.getSolde().compareTo(new BigDecimal(0))<=0){
             throw new RuntimeException("Solde insuffisant pour l'envoyeur");
         }
-        Envoyer.setIdEnv(EnvoyerDTO.idEnv());
-        Envoyer.setMontant(EnvoyerDTO.montant());
-        Envoyer.setRaison(EnvoyerDTO.raison());
-        Envoyer.setNumEnvoyeur(EnvoyerDTO.numEnvoyeur());
-        Envoyer.setNumRecepteur(EnvoyerDTO.numRecepteur());
-        Envoyer.setDate(EnvoyerDTO.date());
-        Envoyer updatedEnvoyer=EnvoyerRepository.save(Envoyer);
+        envoyer.setIdFrais(frais.getIdFrais());
         ClientRepository.save(envoyeur);
         ClientRepository.save(recepteur);
+        Envoyer updatedEnvoyer=EnvoyerRepository.save(envoyer);
         return convertToDTOSelect(updatedEnvoyer);
     }
 
